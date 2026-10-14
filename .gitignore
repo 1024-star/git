@@ -1,0 +1,46 @@
+﻿# ===== 构建产物（可再生成）=====
+build/
+.dart_tool/
+.gradle/
+target/
+*.apk
+*.aab
+*.dill
+*.class
+
+# ===== 依赖缓存 / 第三方包（pip install 产生，不属于项目源码）=====
+.packages
+.flutter-plugins
+.flutter-plugins-dependencies
+__pycache__/
+*.pyc
+*.whl
+PyOpenGL-*.data/
+PyOpenGL-*.dist-info/
+PyOpenGL_accelerate-*.dist-info/
+OpenGL_accelerate/
+pyzed/
+pyzed-*.dist-info/
+site-packages/
+
+# ===== 运行期产生的数据 =====
+zjxd1/app-spring/uploads/
+uploads/
+
+# ===== IDE =====
+.idea/
+.vscode/
+*.iml
+
+# ===== 日志 / 临时 =====
+*.log
+*.err
+ui.xml
+
+# ===== 敏感配置：含明文数据库/SFTP 密码，禁止入库 =====
+zjxd1/app-spring/src/main/resources/application.properties
+zjxd1/app-spring/src/main/resources/application-*.properties
+
+# ===== 系统文件 =====
+.DS_Store
+Thumbs.db

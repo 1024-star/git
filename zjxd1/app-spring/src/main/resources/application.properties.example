@@ -1,0 +1,39 @@
+﻿spring.application.name=app-spring
+
+spring.datasource.url=jdbc:mysql://localhost:3306/zjxd_app?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+spring.datasource.username=root
+spring.datasource.password=CHANGE_ME
+spring.datasource.driver-class-name=com.mysql.cj.jdbc.Driver
+
+# 表结构由 sql/zjxd_app_schema.sql 统一维护，JPA 不再自动建表/改表
+spring.jpa.hibernate.ddl-auto=none
+spring.jpa.show-sql=true
+spring.jpa.properties.hibernate.format_sql=true
+
+# 登录模块配置
+# token 签名密钥（生产部署请替换为随机长字符串）
+app.auth.token-secret=CHANGE_ME
+# token 有效期（小时），App 自动登录在此期限内免密
+app.auth.token-ttl-hours=720
+
+# MyBatis 配置（登录模块 users 表）
+# 数据库列下划线 -> Java 属性小驼峰
+mybatis.configuration.map-underscore-to-camel-case=true
+# Mapper XML 所在位置
+mybatis.mapper-locations=classpath*:mapper/*.xml
+
+server.port=9900
+# 必须监听所有网卡（0.0.0.0）：只监听 127.0.0.1 时，模拟器/真机永远访问不到后端
+server.address=0.0.0.0
+
+# 视频上传（multipart 接收 + SFTP 转存）
+spring.servlet.multipart.max-file-size=1024MB
+spring.servlet.multipart.max-request-size=1024MB
+app.video.upload.sftp-host=10.196.101.54
+app.video.upload.sftp-port=22
+app.video.upload.sftp-user=yczxserver
+app.video.upload.sftp-password=CHANGE_ME
+app.video.upload.remote-dir=/media/yczxserver/SSD-windows/wjf/yolo26/test
+
+# 脊柱筛查图片上传（multipart 接收 + SFTP 转存，固定文件名 back/Backbend 覆盖）
+app.spine.upload.remote-dir=/media/yczxserver/SSD-windows/wjf/run-yolo/back_images

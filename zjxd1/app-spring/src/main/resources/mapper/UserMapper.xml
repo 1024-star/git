@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.example.app_spring.auth.UserMapper">
+
+    <!-- users 表列与 UserEntity 属性的通用映射 -->
+    <sql id="BaseColumns">
+        `id`,
+        `username`,
+        `password`,
+        `nickname`,
+        `avatar`,
+        `status`,
+        `created_at_ms`,
+        `last_login_at_ms`
+    </sql>
+
+    <resultMap id="UserResultMap" type="com.example.app_spring.auth.UserEntity">
+        <id column="id" property="id"/>
+        <result column="username" property="username"/>
+        <result column="password" property="password"/>
+        <result column="nickname" property="nickname"/>
+        <result column="avatar" property="avatar"/>
+        <result column="status" property="status"/>
+        <result column="created_at_ms" property="createdAtMs"/>
+        <result column="last_login_at_ms" property="lastLoginAtMs"/>
+    </resultMap>
+
+    <select id="findByUsername" resultMap="UserResultMap">
+        SELECT <include refid="BaseColumns"/>
+        FROM `users`
+        WHERE `username` = #{username}
+        LIMIT 1
+    </select>
+
+    <select id="findById" resultMap="UserResultMap">
+        SELECT <include refid="BaseColumns"/>
+        FROM `users`
+        WHERE `id` = #{id}
+        LIMIT 1
+    </select>
+
+    <select id="existsByUsername" resultType="boolean">
+        SELECT COUNT(*) &gt; 0
+        FROM `users`
+        WHERE `username` = #{username}
+        LIMIT 1
+    </select>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO `users`
+            (`username`, `password`, `nickname`, `avatar`, `status`, `created_at_ms`, `last_login_at_ms`)
+        VALUES
+            (#{username}, #{password}, #{nickname}, #{avatar}, #{status}, #{createdAtMs}, #{lastLoginAtMs})
+    </insert>
+
+    <update id="updateLastLogin">
+        UPDATE `users`
+        SET `last_login_at_ms` = #{lastLoginAtMs}
+        WHERE `id` = #{id}
+    </update>
+
+</mapper>
