@@ -63,6 +63,11 @@ class _HipBridgeTrainingResultPageState extends State<HipBridgeTrainingResultPag
 
   bool _showGeneratingOverlay = true;
 
+  /// 「正在生成训练结果」浮层的自动关闭定时器。
+  /// 本页结果（星级/分数）全部在 initState 里本地算出，没有任何网络或 AI 请求，
+  /// 因此浮层必须自动消失；之前漏了这一步，用户不点屏幕就会一直停在这里。
+  Timer? _generatingTimer;
+
   // 【核心输出变量】结算星数与分数：达标后统一四星半 + 固定成绩 92 分
   late final double _stars;
   late final int _score;
@@ -83,14 +88,25 @@ class _HipBridgeTrainingResultPageState extends State<HipBridgeTrainingResultPag
           : 1.0;
       _score = ((s / 5) * 40 + completion * 60).round().clamp(0, 100);
     }
+
+    // 结果已在本地算完（本页没有任何网络/AI 请求），浮层短暂展示后必须自动关闭。
+    // 之前漏了这一步，用户不点屏幕就会一直停在「正在生成训练结果」。
+    _generatingTimer?.cancel();
+    _generatingTimer = Timer(const Duration(milliseconds: 1600), () {
+      if (!mounted) return;
+      setState(() => _showGeneratingOverlay = false);
+    });
+  }
+
+  @override
+  void dispose() {
+    _generatingTimer?.cancel();
+    super.dispose();
   }
 
   void _dismissGeneratingOverlay() {
-
     if (!_showGeneratingOverlay) return;
-
     setState(() => _showGeneratingOverlay = false);
-
   }
 
   @override
@@ -186,7 +202,11 @@ class _HipBridgeTrainingResultPageState extends State<HipBridgeTrainingResultPag
 
                     Expanded(
 
-                      child: Center(
+                      // 改为可滚动：结算卡内含 440 高的 TabBarView，
+                      // 横屏/小屏时整列必然超出可用高度，之前会 BOTTOM OVERFLOWED BY 279 PIXELS
+                      child: SingleChildScrollView(
+
+                        child: Center(
 
                         child: ConstrainedBox(
 
@@ -194,7 +214,7 @@ class _HipBridgeTrainingResultPageState extends State<HipBridgeTrainingResultPag
 
                           child: Column(
 
-                            mainAxisAlignment: MainAxisAlignment.center,
+                            mainAxisSize: MainAxisSize.min,
 
                             children: [
 
@@ -258,6 +278,8 @@ class _HipBridgeTrainingResultPageState extends State<HipBridgeTrainingResultPag
                         ),
 
                       ),
+
+                        ),
 
                     ),
 
@@ -1072,8 +1094,11 @@ class _InlineInsightTabs extends StatelessWidget {
                       ),
                       dividerColor: Colors.transparent,
                       indicatorSize: TabBarIndicatorSize.tab,
-                      labelStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
-                      unselectedLabelStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+                      // 字号 16 + 默认 16 内边距时，「数字人播报」5 个字在窄屏/横屏会被裁掉，
+                      // 改为 14 号 + 收紧内边距，保证三个标签完整显示
+                      labelPadding: const EdgeInsets.symmetric(horizontal: 4),
+                      labelStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800),
+                      unselectedLabelStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800),
                       tabs: const [
                         Tab(text: '运动回放'),
                         Tab(text: 'AI教练'),
@@ -1083,7 +1108,8 @@ class _InlineInsightTabs extends StatelessWidget {
                   ),
                   const SizedBox(height: 12),
                   SizedBox(
-                    height: 440,
+                    // 高度自适应：横屏/小屏自动收缩，避免整卡超高溢出
+                    height: (MediaQuery.of(context).size.height * 0.52).clamp(260.0, 440.0),
                     child: TabBarView(
                       children: [
                         ClipRRect(
@@ -2533,7 +2559,7 @@ class _DigitalHumanAnalysisDialogBody extends StatelessWidget {
 
   Widget build(BuildContext context) {
 
-    return const _AssetVideoPlayerBody(assetPath: 'assets/images/digital-human-coachr.mov');
+    return const _AssetVideoPlayerBody(assetPath: 'assets/images/digital-human-coachr.mp4');
 
   }
 
@@ -2583,9 +2609,17 @@ class _AssetVideoPlayerBodyState extends State<_AssetVideoPlayerBody> {
 
     try {
 
-      final controller = VideoPlayerController.asset(widget.assetPath);
+      // mixWithOthers：避免与其它音频（音效/系统音）抢音频焦点导致整段无声
+      final controller = VideoPlayerController.asset(
+        widget.assetPath,
+        videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
+      );
 
       await controller.initialize();
+
+      // 显式把音量设为 1.0：数字人视频自带 AAC 音轨（48kHz 立体声），
+      // 不设置时依赖插件默认值，显式设置可排除"被静音"的可能
+      await controller.setVolume(1.0);
 
       await controller.setLooping(true);
 

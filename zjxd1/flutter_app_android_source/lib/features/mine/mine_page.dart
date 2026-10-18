@@ -816,14 +816,59 @@ class _UserInfo extends StatelessWidget {
           Text(name, style: const TextStyle(color: Colors.white, fontSize: _MineTeenStyle.userName, fontWeight: FontWeight.w900)),
           const SizedBox(height: 10),
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Text('🔥', style: TextStyle(fontSize: 18)),
               const SizedBox(width: 6),
-              Text('连续打卡 ', style: TextStyle(color: Colors.white.withValues(alpha: 0.95), fontSize: _MineTeenStyle.userMeta, fontWeight: FontWeight.w700)),
-              Text('$consecutiveDays', style: const TextStyle(color: Color(0xFFFFF176), fontSize: _MineTeenStyle.userMeta, fontWeight: FontWeight.w900)),
-              Text(' 天 · 总打卡 ', style: TextStyle(color: Colors.white.withValues(alpha: 0.95), fontSize: _MineTeenStyle.userMeta, fontWeight: FontWeight.w700)),
-              Text('$totalCheckInDays', style: const TextStyle(color: Color(0xFFFFF176), fontSize: _MineTeenStyle.userMeta, fontWeight: FontWeight.w900)),
-              Text(' 天', style: TextStyle(color: Colors.white.withValues(alpha: 0.95), fontSize: _MineTeenStyle.userMeta, fontWeight: FontWeight.w700)),
+              Expanded(
+                child: Text.rich(
+                  TextSpan(
+                    children: [
+                      TextSpan(
+                        text: '连续打卡 ',
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.95),
+                          fontSize: _MineTeenStyle.userMeta,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      TextSpan(
+                        text: '$consecutiveDays',
+                        style: const TextStyle(
+                          color: Color(0xFFFFF176),
+                          fontSize: _MineTeenStyle.userMeta,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      TextSpan(
+                        text: ' 天 · 总打卡 ',
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.95),
+                          fontSize: _MineTeenStyle.userMeta,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      TextSpan(
+                        text: '$totalCheckInDays',
+                        style: const TextStyle(
+                          color: Color(0xFFFFF176),
+                          fontSize: _MineTeenStyle.userMeta,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      TextSpan(
+                        text: ' 天',
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.95),
+                          fontSize: _MineTeenStyle.userMeta,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
+                  softWrap: true,
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 10),

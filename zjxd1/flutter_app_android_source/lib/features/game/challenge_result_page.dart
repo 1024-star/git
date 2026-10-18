@@ -136,11 +136,14 @@ class _ChallengeResultPageState extends State<ChallengeResultPage> {
                       ),
                       const SizedBox(height: 18),
                       Expanded(
-                        child: Center(
+                        // 改为可滚动：本页文字被放大 1.5 倍，横屏时内容必然超出可用高度，
+                        // 之前会 BOTTOM OVERFLOWED BY 292 PIXELS
+                        child: SingleChildScrollView(
+                          child: Center(
                           child: ConstrainedBox(
                             constraints: const BoxConstraints(maxWidth: 560),
                             child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
+                              mainAxisSize: MainAxisSize.min,
                               children: [
                                 AnimatedSwitcher(
                                   duration: const Duration(milliseconds: 320),
@@ -206,6 +209,7 @@ class _ChallengeResultPageState extends State<ChallengeResultPage> {
                                 ),
                               ],
                             ),
+                          ),
                           ),
                         ),
                       ),
@@ -388,8 +392,8 @@ class _ResultCardGeneratingPanel extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: _ResultCardFrame(
-        child: const SizedBox(
-          height: 380,
+        child: SizedBox(
+          height: (MediaQuery.of(context).size.height * 0.5).clamp(180.0, 380.0),
           width: double.infinity,
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,

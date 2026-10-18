@@ -97,7 +97,14 @@ class PostureApiClient {
       },
     );
 
-    final resp = await _client.get(uri);
+    // 必须带超时：后端不可达时不能永久挂起，否则报告页会一直停在等待态
+    final resp = await _client.get(uri).timeout(
+      const Duration(seconds: 12),
+      onTimeout: () {
+        AppLogger.e('体态API', '获取体态报告超时（12s）');
+        throw PostureApiException('分析服务响应超时，请检查后端服务后重试');
+      },
+    );
     final decoded = _tryDecodeJson(resp);
 
     if (resp.statusCode != 200) {

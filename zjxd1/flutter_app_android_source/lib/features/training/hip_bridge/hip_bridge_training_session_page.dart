@@ -527,6 +527,13 @@ class _HipBridgeTrainingSessionPageState extends State<HipBridgeTrainingSessionP
     unawaited(_sfxPlayer.dispose());
     unawaited(_goodSfxPlayer.stop());
     unawaited(_goodSfxPlayer.dispose());
+
+    // 【关键】释放 SoLoud 音频引擎：之前只 dispose 了音源、没有 deinit，
+    // 引擎会一直占着 Android 音频会话，导致后续「数字人播报」的 video_player 无声。
+    if (_soLoudReady) {
+      _soLoud.deinit();
+      _soLoudReady = false;
+    }
     unawaited(SystemChrome.setPreferredOrientations(DeviceOrientation.values));
     super.dispose();
   }

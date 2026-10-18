@@ -41,6 +41,9 @@ dependencies:
   http: ^1.2.2
   flutter_soloud: ^3.4.10
   shared_preferences: ^2.2.2
+  # 小灵语音输入：录音（WAV 16k 单声道，交给 PC 端离线识别）
+  record: ^6.1.1
+  path_provider: ^2.1.4
   # 用 CameraX 实现替代旧 Camera2(camera_android)：Camera2 下预览与取帧互斥，会黑屏；
   # CameraX 支持 Preview + ImageAnalysis 并存（官方 camera 插件的默认实现）。
   camera_android_camerax: ^0.6.30

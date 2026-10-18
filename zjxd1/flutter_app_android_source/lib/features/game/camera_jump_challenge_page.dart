@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:typed_data';
 
 import 'dart:io';
 
@@ -9,6 +11,7 @@ import 'dart:math' as math;
 import 'package:camera/camera.dart';
 
 import 'package:flutter/material.dart';
+import '../../config/app_config.dart';
 
 import 'package:flutter/services.dart';
 
@@ -87,8 +90,13 @@ class _CameraJumpChallengePageState extends State<CameraJumpChallengePage> with 
 
 
   CameraController? _controller;
+  final Stopwatch _sw = Stopwatch();
+
 
   Future<void>? _initFuture;
+
+  /// 防重入：横屏切换会触发 resumed 生命周期，若不拦截相机会被初始化两次
+  bool _cameraInitializing = false;
 
   String? _initErrorText;
 
@@ -155,6 +163,9 @@ class _CameraJumpChallengePageState extends State<CameraJumpChallengePage> with 
     super.initState();
 
     WidgetsBinding.instance.addObserver(this);
+    _sw.start();
+AppLogger.i('跳跃挑战', '[TIME] T0 页面 initState 开始');
+
 
     remainingSeconds = widget.config.level.timeLimitSeconds;
 
@@ -167,16 +178,14 @@ class _CameraJumpChallengePageState extends State<CameraJumpChallengePage> with 
   }
 
   Future<void> _lockLandscapeAndInitCamera() async {
-    // 先完成界面方向切换，再创建相机控制器；否则模拟器会把预览锁在进入
-    // 页面前的竖屏方向，造成相机画面横置。
-    await SystemChrome.setPreferredOrientations(const [
+    // 横屏切换与相机枚举互不依赖：并行发起，避免串行累加（实测 155ms + 735ms）
+    final orientationFuture = SystemChrome.setPreferredOrientations(const [
       DeviceOrientation.landscapeLeft,
     ]);
     if (!mounted) return;
-    await _initCamera();
+    await _initCamera(orientationFuture);
+    AppLogger.i('跳跃挑战', '[TIME] T5 摄像头全流程完成 +${_sw.elapsedMilliseconds}ms');
   }
-
-
 
   Future<void> _initBgm() async {
 
@@ -206,7 +215,7 @@ class _CameraJumpChallengePageState extends State<CameraJumpChallengePage> with 
 
           iOS: AudioContextIOS(
 
-            category: AVAudioSessionCategory.ambient,
+            category: AVAudioSessionCategory.playback,
 
             options: const {
 
@@ -329,6 +338,11 @@ class _CameraJumpChallengePageState extends State<CameraJumpChallengePage> with 
     unawaited(_bgmPlayer.dispose());
 
     unawaited(_countdownPlayer.dispose());
+    // 同上：释放 SoLoud 引擎，避免占住音频会话导致其它播放器无声
+    try {
+      _soLoud.deinit();
+    } catch (_) {}
+
 
     final src = _tapSfxSource;
 
@@ -480,316 +494,378 @@ class _CameraJumpChallengePageState extends State<CameraJumpChallengePage> with 
 
 
 
-  Future<void> _initCamera() async {
-
+  Future<void> _initCamera([Future<void>? orientationFuture]) async {
+    if (_cameraInitializing) return;
+    _cameraInitializing = true;
     try {
+      // 立即发起枚举但不阻塞弹窗：弹窗先出现并显示"正在搜索摄像头…"
+      AppLogger.i('跳跃挑战', '[TIME] T1a 开始枚举相机 +${_sw.elapsedMilliseconds}ms');
+      final camerasFuture = availableCameras().timeout(_cameraTimeout);
 
-      final cameras = await availableCameras().timeout(_cameraTimeout);
+      CameraDescription? selectedCamera = _lastSelectedCamera;
+      if (selectedCamera == null) {
+        if (!mounted) return;
+        // 必须等首帧渲染完成后再弹窗：initState 尚未结束时 showDialog 取不到 Localizations
+        await WidgetsBinding.instance.endOfFrame;
+        if (!mounted) return;
+        AppLogger.i('跳跃挑战', '[TIME] T2a 立即弹出摄像头选择框 +${_sw.elapsedMilliseconds}ms');
+        selectedCamera = await _showCameraSelectionDialog(camerasFuture);
+        AppLogger.i('跳跃挑战', '[TIME] T3 用户已选定摄像头 +${_sw.elapsedMilliseconds}ms');
+        _lastSelectedCamera = selectedCamera;
+      }
+
+      final cameras = await camerasFuture;
+      AppLogger.i('跳跃挑战', '[TIME] T2 相机枚举完成(共${cameras.length}个) +${_sw.elapsedMilliseconds}ms');
 
       if (cameras.isEmpty) {
-
         throw StateError('未检测到可用相机。若使用模拟器，请开启虚拟相机或使用真机测试。');
-
       }
 
-
-
-      CameraDescription? selectedCamera;
-
-      if (cameras.length > 1) {
-        // 生命周期恢复重初始化时复用上次选择，避免再次打断游戏弹框
-        selectedCamera = _lastSelectedCamera;
-        if (selectedCamera == null) {
-          if (!mounted) return;
-          selectedCamera = await _showCameraSelectionDialog(cameras);
-          _lastSelectedCamera = selectedCamera;
-        }
+      for (var i = 0; i < cameras.length; i++) {
+        AppLogger.i('跳跃挑战',
+            '相机[$i] name=${cameras[i].name} lens=${cameras[i].lensDirection} sensorOrientation=${cameras[i].sensorOrientation}');
       }
 
-      final cameraToUse = selectedCamera ?? cameras.firstWhere(
-        (c) => c.lensDirection == CameraLensDirection.front,
-        orElse: () => cameras.first,
-      );
+      final cameraToUse = selectedCamera ??
+          cameras.firstWhere(
+            (c) => c.lensDirection == CameraLensDirection.front,
+            orElse: () => cameras.first,
+          );
 
-
+      // 横屏方向必须早于控制器创建完成，否则模拟器预览会横置
+      if (orientationFuture != null) {
+        await orientationFuture;
+        AppLogger.i('跳跃挑战', '[TIME] T1 横屏切换完成 +${_sw.elapsedMilliseconds}ms');
+      }
 
       final controller = CameraController(
-
         cameraToUse,
-
-        ResolutionPreset.high,
-
+        // medium：模拟器虚拟相机 use case 有限，high 会导致相机起不来
+        ResolutionPreset.medium,
         enableAudio: false,
-        imageFormatGroup: ImageFormatGroup.jpeg,
-
       );
 
-
-
+      AppLogger.i('跳跃挑战', '[TIME] T3a 开始 controller.initialize() +${_sw.elapsedMilliseconds}ms');
       await controller.initialize().timeout(_cameraTimeout);
+      AppLogger.i('跳跃挑战', '[TIME] T4 initialize 完成 +${_sw.elapsedMilliseconds}ms');
 
-      await controller.lockCaptureOrientation(DeviceOrientation.landscapeLeft);
-      await controller.setFlashMode(FlashMode.off);
-      
-      // 设置最小缩放，拉远拍摄距离
+      // 图像流：供「自动动作计数」使用
       try {
-        final maxZoom = await controller.getMaxZoomLevel();
-        await controller.setZoomLevel(1.0);
+        await controller.startImageStream(_onPoseFrame);
       } catch (e, st) {
         AppLogger.e('跳跃挑战', e, st);
       }
 
+      // 朝向 / 闪光灯并行；缩放放后台，避免串行等待拖慢首帧
+      await Future.wait([
+        _safeCall(() => controller.lockCaptureOrientation(DeviceOrientation.landscapeLeft)),
+        _safeCall(() => controller.setFlashMode(FlashMode.off)),
+      ]);
+      unawaited(_safeCall(() => controller.setZoomLevel(1.0)));
+
       if (!mounted) {
-
         await controller.dispose();
-
         return;
-
       }
 
-
-
+      AppLogger.i('跳跃挑战', '[TIME] T4b 图像流/朝向/闪光灯处理完成 +${_sw.elapsedMilliseconds}ms');
       setState(() {
-
         _controller = controller;
-
         _initErrorText = null;
-
       });
-
     } catch (e, st) {
-
       AppLogger.e('跳跃挑战', e, st);
-
       if (!mounted) return;
-
       setState(() {
-
         _initErrorText = e.toString();
-
       });
-
       rethrow;
-
+    } finally {
+      _cameraInitializing = false;
     }
-
   }
 
-  Future<CameraDescription?> _showCameraSelectionDialog(List<CameraDescription> cameras) async {
+  /// 容错包装：单项失败不影响整体初始化（如设备不支持闪光灯/缩放）
+  Future<void> _safeCall(Future<void> Function() action) async {
+    try {
+      await action();
+    } catch (e, st) {
+      AppLogger.e('跳跃挑战', e, st);
+    }
+  }
+
+  Future<CameraDescription?> _showCameraSelectionDialog(
+      Future<List<CameraDescription>> camerasFuture) async {
+    var autoPicked = false;
     return await showDialog<CameraDescription>(
       context: context,
-      builder: (context) {
-        return Dialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-          elevation: 0,
-          backgroundColor: Colors.transparent,
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 300),
-            child: Container(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [
-                    const Color(0xFF667EEA).withValues(alpha: 0.15),
-                    const Color(0xFF764BA2).withValues(alpha: 0.08),
-                  ],
+      builder: (dialogContext) {
+        return FutureBuilder<List<CameraDescription>>(
+          future: camerasFuture,
+          builder: (context, snapshot) {
+            final loading = snapshot.connectionState != ConnectionState.done;
+            final failed = snapshot.hasError;
+            final cameras = snapshot.data ?? const <CameraDescription>[];
+
+            // 只有一个摄像头时无需用户选择：自动选中并关闭（保持原有行为）
+            if (!loading && !failed && cameras.length == 1 && !autoPicked) {
+              autoPicked = true;
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (Navigator.of(dialogContext).canPop()) {
+                  Navigator.of(dialogContext).pop(cameras.first);
+                }
+              });
+            }
+
+            return Dialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+              elevation: 0,
+              backgroundColor: Colors.transparent,
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxWidth: 420,
+                  maxHeight: MediaQuery.of(context).size.height - 24,
                 ),
-                borderRadius: BorderRadius.circular(24),
-                border: Border.all(
-                  color: Colors.white.withValues(alpha: 0.3),
-                  width: 1.5,
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: const Color(0xFF667EEA).withValues(alpha: 0.2),
-                    blurRadius: 30,
-                    offset: const Offset(0, 10),
-                  ),
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.1),
-                    blurRadius: 20,
-                    offset: const Offset(0, 5),
-                  ),
-                ],
-              ),
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-                      decoration: BoxDecoration(
-                        gradient: const LinearGradient(
-                          colors: [Color(0xFF667EEA), Color(0xFF764BA2)],
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                        ),
-                        borderRadius: BorderRadius.circular(20),
-                        boxShadow: [
-                          BoxShadow(
-                            color: const Color(0xFF667EEA).withValues(alpha: 0.4),
-                            blurRadius: 15,
-                            offset: const Offset(0, 8),
-                          ),
-                        ],
-                      ),
-                      child: const Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.camera_alt_rounded, color: Colors.white, size: 28),
-                          SizedBox(width: 14),
-                          Text(
-                            '选择摄像头',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 20,
-                              fontWeight: FontWeight.w900,
-                              letterSpacing: 0.5,
-                            ),
-                          ),
-                        ],
-                      ),
+                child: Container(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [
+                        const Color(0xFF667EEA).withValues(alpha: 0.15),
+                        const Color(0xFF764BA2).withValues(alpha: 0.08),
+                      ],
                     ),
-                    const SizedBox(height: 24),
-                    SizedBox(
-                      width: 240,
-                      child: ListView.builder(
-                        shrinkWrap: true,
-                        itemCount: cameras.length,
-                        itemBuilder: (context, index) {
-                          final camera = cameras[index];
-                          final lensDirection = camera.lensDirection == CameraLensDirection.front
-                              ? ''
-                              : camera.lensDirection == CameraLensDirection.back
-                                  ? ''
-                                  : '';
-                          final icon = camera.lensDirection == CameraLensDirection.front
-                              ? Icons.camera_front
-                              : camera.lensDirection == CameraLensDirection.back
-                                  ? Icons.camera_rear
-                                  : Icons.videocam;
-                          return Container(
-                            margin: const EdgeInsets.only(bottom: 14),
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(18),
-                              border: Border.all(
-                                color: const Color(0xFF667EEA).withValues(alpha: 0.2),
-                                width: 1.5,
-                              ),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: const Color(0xFF667EEA).withValues(alpha: 0.08),
-                                  blurRadius: 12,
-                                  offset: const Offset(0, 6),
-                                ),
-                              ],
+                    borderRadius: BorderRadius.circular(24),
+                    border: Border.all(color: Colors.white.withValues(alpha: 0.3), width: 1.5),
+                    boxShadow: [
+                      BoxShadow(
+                        color: const Color(0xFF667EEA).withValues(alpha: 0.2),
+                        blurRadius: 30,
+                        offset: const Offset(0, 10),
+                      ),
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.1),
+                        blurRadius: 20,
+                        offset: const Offset(0, 5),
+                      ),
+                    ],
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(14),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                          decoration: BoxDecoration(
+                            gradient: const LinearGradient(
+                              colors: [Color(0xFF667EEA), Color(0xFF764BA2)],
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
                             ),
-                            child: Material(
-                              color: Colors.transparent,
-                              child: InkWell(
-                                borderRadius: BorderRadius.circular(18),
-                                onTap: () => Navigator.of(context).pop(camera),
-                                child: ListTile(
-                                  contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
-                                  leading: Container(
-                                    width: 52,
-                                    height: 52,
+                            borderRadius: BorderRadius.circular(20),
+                            boxShadow: [
+                              BoxShadow(
+                                color: const Color(0xFF667EEA).withValues(alpha: 0.4),
+                                blurRadius: 15,
+                                offset: const Offset(0, 8),
+                              ),
+                            ],
+                          ),
+                          child: const Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.camera_alt_rounded, color: Colors.white, size: 22),
+                              SizedBox(width: 10),
+                              Text(
+                                '选择摄像头',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 17,
+                                  fontWeight: FontWeight.w900,
+                                  letterSpacing: 0.5,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        if (loading) ...[
+                          const SizedBox(height: 6),
+                          const CircularProgressIndicator(color: Color(0xFF667EEA)),
+                          const SizedBox(height: 12),
+                          const Text('正在搜索摄像头…',
+                              style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w700,
+                                  color: Color(0xFF4B5563))),
+                          const SizedBox(height: 6),
+                        ] else if (failed) ...[
+                          const SizedBox(height: 6),
+                          const Icon(Icons.error_outline_rounded, color: Color(0xFFEF4444), size: 32),
+                          const SizedBox(height: 8),
+                          const Text('摄像头搜索失败',
+                              style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w900,
+                                  color: Color(0xFF1F2937))),
+                          const SizedBox(height: 4),
+                          Text('${snapshot.error}',
+                              textAlign: TextAlign.center,
+                              maxLines: 4,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontSize: 11, color: Color(0xFF6B7280))),
+                          const SizedBox(height: 6),
+                        ] else if (cameras.isEmpty) ...[
+                          const SizedBox(height: 6),
+                          const Icon(Icons.videocam_off_rounded, color: Color(0xFFEF4444), size: 32),
+                          const SizedBox(height: 8),
+                          const Text('未检测到可用摄像头',
+                              style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w900,
+                                  color: Color(0xFF1F2937))),
+                          const SizedBox(height: 6),
+                        ] else
+                          Flexible(
+                            child: SizedBox(
+                              width: 320,
+                              child: ListView.builder(
+                                shrinkWrap: true,
+                                itemCount: cameras.length,
+                                itemBuilder: (context, index) {
+                                  final camera = cameras[index];
+                                  final lensDirection = camera.lensDirection == CameraLensDirection.front
+                                      ? '前置摄像头（本机/USB 摄像头）'
+                                      : camera.lensDirection == CameraLensDirection.back
+                                          ? '后置摄像头（模拟场景）'
+                                          : '外接摄像头';
+                                  final icon = camera.lensDirection == CameraLensDirection.front
+                                      ? Icons.camera_front
+                                      : camera.lensDirection == CameraLensDirection.back
+                                          ? Icons.camera_rear
+                                          : Icons.videocam;
+                                  return Container(
+                                    margin: const EdgeInsets.only(bottom: 8),
                                     decoration: BoxDecoration(
-                                      gradient: LinearGradient(
-                                        colors: [
-                                          const Color(0xFF667EEA).withValues(alpha: 0.15),
-                                          const Color(0xFF764BA2).withValues(alpha: 0.08),
-                                        ],
-                                        begin: Alignment.topLeft,
-                                        end: Alignment.bottomRight,
-                                      ),
-                                      borderRadius: BorderRadius.circular(14),
+                                      color: Colors.white,
+                                      borderRadius: BorderRadius.circular(18),
                                       border: Border.all(
                                         color: const Color(0xFF667EEA).withValues(alpha: 0.2),
-                                        width: 1,
+                                        width: 1.5,
+                                      ),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: const Color(0xFF667EEA).withValues(alpha: 0.08),
+                                          blurRadius: 12,
+                                          offset: const Offset(0, 6),
+                                        ),
+                                      ],
+                                    ),
+                                    child: Material(
+                                      color: Colors.transparent,
+                                      child: InkWell(
+                                        borderRadius: BorderRadius.circular(18),
+                                        onTap: () => Navigator.of(context).pop(camera),
+                                        child: ListTile(
+                                          contentPadding:
+                                              const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                                          leading: Container(
+                                            width: 40,
+                                            height: 40,
+                                            decoration: BoxDecoration(
+                                              gradient: LinearGradient(
+                                                colors: [
+                                                  const Color(0xFF667EEA).withValues(alpha: 0.15),
+                                                  const Color(0xFF764BA2).withValues(alpha: 0.08),
+                                                ],
+                                                begin: Alignment.topLeft,
+                                                end: Alignment.bottomRight,
+                                              ),
+                                              borderRadius: BorderRadius.circular(14),
+                                              border: Border.all(
+                                                color: const Color(0xFF667EEA).withValues(alpha: 0.2),
+                                                width: 1,
+                                              ),
+                                            ),
+                                            child: Icon(icon, color: const Color(0xFF667EEA), size: 22),
+                                          ),
+                                          title: Text(
+                                            '摄像头 ${index + 1}  ${camera.name}',
+                                            style: const TextStyle(
+                                              fontSize: 15,
+                                              fontWeight: FontWeight.w900,
+                                              color: Color(0xFF1F2937),
+                                            ),
+                                          ),
+                                          subtitle: Text(
+                                            lensDirection,
+                                            style: const TextStyle(
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w700,
+                                              color: Color(0xFF6B7280),
+                                            ),
+                                          ),
+                                          trailing: Container(
+                                            padding: const EdgeInsets.all(8),
+                                            decoration: BoxDecoration(
+                                              color: const Color(0xFF667EEA).withValues(alpha: 0.1),
+                                              borderRadius: BorderRadius.circular(10),
+                                            ),
+                                            child: const Icon(
+                                              Icons.check_circle_outline,
+                                              color: Color(0xFF667EEA),
+                                              size: 20,
+                                            ),
+                                          ),
+                                        ),
                                       ),
                                     ),
-                                    child: Icon(icon, color: const Color(0xFF667EEA), size: 30),
-                                  ),
-                                  title: Text(
-                                    '摄像头 ${index + 1}',
-                                    style: const TextStyle(
-                                      fontSize: 17,
-                                      fontWeight: FontWeight.w900,
-                                      color: Color(0xFF1F2937),
-                                    ),
-                                  ),
-                                  subtitle: Text(
-                                    lensDirection,
-                                    style: const TextStyle(
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w700,
-                                      color: Color(0xFF6B7280),
-                                    ),
-                                  ),
-                                  trailing: Container(
-                                    padding: const EdgeInsets.all(8),
-                                    decoration: BoxDecoration(
-                                      color: const Color(0xFF667EEA).withValues(alpha: 0.1),
-                                      borderRadius: BorderRadius.circular(10),
-                                    ),
-                                    child: const Icon(
-                                      Icons.check_circle_outline,
-                                      color: Color(0xFF667EEA),
-                                      size: 20,
-                                    ),
-                                  ),
-                                ),
+                                  );
+                                },
                               ),
                             ),
-                          );
-                        },
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-                    SizedBox(
-                      width: double.infinity,
-                      height: 52,
-                      child: OutlinedButton(
-                        onPressed: () => Navigator.of(context).pop(),
-                        style: OutlinedButton.styleFrom(
-                          side: BorderSide(
-                            color: const Color(0xFF667EEA).withValues(alpha: 0.3),
-                            width: 2,
                           ),
-                          foregroundColor: const Color(0xFF667EEA),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(16),
+                        const SizedBox(height: 12),
+                        SizedBox(
+                          width: double.infinity,
+                          height: 44,
+                          child: OutlinedButton(
+                            onPressed: () => Navigator.of(dialogContext).pop(),
+                            style: OutlinedButton.styleFrom(
+                              side: BorderSide(
+                                color: const Color(0xFF667EEA).withValues(alpha: 0.3),
+                                width: 2,
+                              ),
+                              foregroundColor: const Color(0xFF667EEA),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                              backgroundColor: Colors.white.withValues(alpha: 0.5),
+                            ),
+                            child: const Text(
+                              '取消',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: 0.5,
+                              ),
+                            ),
                           ),
-                          backgroundColor: Colors.white.withValues(alpha: 0.5),
                         ),
-                        child: const Text(
-                          '取消',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w900,
-                            letterSpacing: 0.5,
-                          ),
-                        ),
-                      ),
+                      ],
                     ),
-                  ],
+                  ),
                 ),
               ),
-            ),
-          ),
+            );
+          },
         );
       },
     );
   }
 
-
-
-  /// 串行切换相机：必须先释放旧控制器再初始化新的。
-  /// 模拟器/Windows 摄像头桥接下设备是独占的，"先开后关"会因抢占冲突导致画面永久卡住。
   Future<void> _switchCamera() async {
 
     // 录制中切换会销毁正在录制的控制器，直接中断录像，禁止
@@ -915,7 +991,7 @@ class _CameraJumpChallengePageState extends State<CameraJumpChallengePage> with 
       // 必须主动释放，等 resumed 后重建，否则预览会永久冻结
       _releaseCameraForLifecycle();
     } else if (state == AppLifecycleState.resumed) {
-      if (mounted && _controller == null && _initErrorText == null) {
+      if (mounted && _controller == null && _initErrorText == null && !_cameraInitializing) {
         // 复用横屏锁定+初始化流程；已记住上次选择的摄像头，不会重新弹框
         setState(() {
           _initFuture = _lockLandscapeAndInitCamera();
@@ -945,6 +1021,7 @@ class _CameraJumpChallengePageState extends State<CameraJumpChallengePage> with 
   /// 相机初始化/切换失败后的手动重试入口
   void _retryCameraInit() {
     if (isRecording) return;
+    if (_cameraInitializing) return;
     setState(() {
       _initErrorText = null;
       _initFuture = _lockLandscapeAndInitCamera();
@@ -953,11 +1030,52 @@ class _CameraJumpChallengePageState extends State<CameraJumpChallengePage> with 
 
 
 
+  // ==================== 自动动作计数：向识别服务发帧 ====================
+
+  /// 背压：上一帧还没回包就不发下一帧，避免积压
+  bool _poseSending = false;
+  DateTime _poseLastSent = DateTime.fromMillisecondsSinceEpoch(0);
+  /// 发送间隔（毫秒）：约 12fps
+  static const int _poseIntervalMs = 80;
+
+  /// 相机帧回调：抽帧发给 PC 端识别服务，由服务判定「是否完成一次跳跃」
+  void _onPoseFrame(CameraImage img) {
+    if (!mounted) return;
+    if (!isRecording) return;
+    if (_poseSending) return;
+    final now = DateTime.now();
+    if (now.difference(_poseLastSent).inMilliseconds < _poseIntervalMs) return;
+    final ws = _ws;
+    if (ws == null || !wsConnected) return;
+    _poseSending = true;
+    _poseLastSent = now;
+    try {
+      ws.add(_packYPlane(img));
+    } catch (_) {
+      _poseSending = false;
+    }
+  }
+
+  /// 打包 Y 平面灰度帧（App 侧零编码开销）
+  /// 格式：[Y1][w:u16][h:u16][stride:u16] + Y 字节
+  Uint8List _packYPlane(CameraImage img) {
+    final p = img.planes[0];
+    final hdr = ByteData(8);
+    hdr.setUint8(0, 0x59);
+    hdr.setUint8(1, 0x31);
+    hdr.setUint16(2, img.width & 0xFFFF, Endian.little);
+    hdr.setUint16(4, img.height & 0xFFFF, Endian.little);
+    hdr.setUint16(6, p.bytesPerRow & 0xFFFF, Endian.little);
+    final out = Uint8List(8 + p.bytes.length);
+    out.setRange(0, 8, hdr.buffer.asUint8List());
+    out.setRange(8, out.length, p.bytes);
+    return out;
+  }
+
   Future<void> _connectWebSocketIfNeeded() async {
 
-    final url = widget.config.wsUrl;
-
-    if (url == null) return;
+    // 优先用配置里的 wsUrl；没有则连本机视觉识别服务（jump 模式，自动计数）
+    final url = widget.config.wsUrl ?? Uri.parse(kPoseWsUrl);
 
 
 
@@ -973,6 +1091,10 @@ class _CameraJumpChallengePageState extends State<CameraJumpChallengePage> with 
 
       wsConnected = true;
 
+      // 切到跳跃计数模式并复位
+      ws.add(jsonEncode({'cmd': 'mode', 'value': 'jump'}));
+      ws.add(jsonEncode({'cmd': 'reset'}));
+
 
 
       _wsSub = ws.listen(
@@ -982,6 +1104,18 @@ class _CameraJumpChallengePageState extends State<CameraJumpChallengePage> with 
           if (!mounted) return;
 
           if (!isRecording) return;
+
+          // 识别服务每帧都会回包，只有 event == 'jump' 才算一次有效动作
+          bool isJump = false;
+          try {
+            final m = jsonDecode(event as String) as Map<String, dynamic>;
+            isJump = m['event'] == 'jump';
+            _poseSending = false;   // 背压：收到回包才允许发下一帧
+          } catch (_) {
+            _poseSending = false;
+            return;
+          }
+          if (!isJump) return;
 
           setState(() {
 
@@ -1576,6 +1710,19 @@ class _CameraJumpChallengePageState extends State<CameraJumpChallengePage> with 
 
             ),
 
+            // ===== 测试模式：点击画面任意位置 = 计数 +1 =====
+            // 刻意放在 Stack 靠前的位置：空白处/画面区域点击计数，
+            // 后面的导航栏、GO、翻转摄像头等按钮仍优先响应，互不干扰。
+            Positioned.fill(
+              child: IgnorePointer(
+                ignoring: !isRecording || isStarting,
+                child: GestureDetector(
+                  onTap: _debugPlusOne,
+                  behavior: HitTestBehavior.opaque,
+                  child: const SizedBox.expand(),
+                ),
+              ),
+            ),
             Positioned(
 
               left: 0,
@@ -1720,29 +1867,6 @@ class _CameraJumpChallengePageState extends State<CameraJumpChallengePage> with 
 
             ),
 
-            Positioned(
-
-              right: 0,
-
-              bottom: 0,
-
-              child: IgnorePointer(
-
-                ignoring: !isRecording || isStarting,
-
-                child: GestureDetector(
-
-                  onTap: _debugPlusOne,
-
-                  behavior: HitTestBehavior.opaque,
-
-                  child: const SizedBox(width: 220, height: 220),
-
-                ),
-
-              ),
-
-            ),
 
           ],
 

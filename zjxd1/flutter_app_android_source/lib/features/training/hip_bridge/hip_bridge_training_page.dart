@@ -7,6 +7,7 @@ import '../../../utils/app_logger.dart';
 import '../../mine/motion_api_client.dart';
 import '../../../utils/user_scope.dart';
 import 'hip_bridge_training_session_page.dart';
+import 'hip_bridge_ai_training_page.dart';
 import 'hip_bridge_training_result_page.dart';
 
 class HipBridgeTrainingPage extends StatefulWidget {
@@ -104,6 +105,19 @@ class _HipBridgeTrainingPageState extends State<HipBridgeTrainingPage> with Sing
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('准备开始训练！目标: $targetText')),
+    );
+  }
+
+  /// 启动「AI 动作分析训练」：摄像头 + 实时骨骼识别 + 规则评分
+  void _startAiTraining() {
+    final targetReps = currentMode == 1 ? selectedCount : 10;
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => HipBridgeAiTrainingPage(
+          targetReps: targetReps,
+          levelName: '臀桥训练',
+        ),
+      ),
     );
   }
 
@@ -294,6 +308,11 @@ class _HipBridgeTrainingPageState extends State<HipBridgeTrainingPage> with Sing
                       onSelectCount: (v) => setState(() => selectedCount = v),
                       onStart: _startTraining,
                       onClearResult: _clearAndStartNew,
+                    ),
+                    const SizedBox(height: 12),
+                    _StartButton(
+                      onTap: _startAiTraining,
+                      label: 'AI 动作分析训练',
                     ),
                     const SizedBox(height: 16),
                     _LeaderboardSection(leaderboard: leaderboard),
@@ -755,7 +774,8 @@ class _OptionGrid extends StatelessWidget {
 }
 
 class _StartButton extends StatelessWidget {
-  const _StartButton({required this.onTap});
+  const _StartButton({required this.onTap, this.label});
+  final String? label;
 
   final VoidCallback onTap;
 
@@ -785,9 +805,9 @@ class _StartButton extends StatelessWidget {
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Text(
-              '开始训练',
-              style: TextStyle(fontSize: 23, fontWeight: FontWeight.w900, color: Colors.white),
+            Text(
+              label ?? '开始训练',
+              style: const TextStyle(fontSize: 23, fontWeight: FontWeight.w900, color: Colors.white),
             ),
             const SizedBox(width: 10),
             Image.asset(

@@ -266,6 +266,39 @@ class _SpineReportPageState extends State<SpineReportPage> {
                   future: _future,
                   builder: (context, snapshot) {
                     final report = snapshot.data;
+                    // 分析失败：明确提示 + 重试，不再静默用默认值冒充结果
+                    if (snapshot.hasError && report == null) {
+                      return Center(
+                        child: Padding(
+                          padding: const EdgeInsets.all(24),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.error_outline, color: Color(0xFFEF4444), size: 52),
+                              const SizedBox(height: 14),
+                              const Text('分析失败',
+                                  style: TextStyle(fontSize: 19, fontWeight: FontWeight.bold, color: Color(0xFFEF4444))),
+                              const SizedBox(height: 8),
+                              Text('${snapshot.error}',
+                                  textAlign: TextAlign.center,
+                                  style: const TextStyle(fontSize: 13, color: Color(0xFF666666), height: 1.6)),
+                              const SizedBox(height: 18),
+                              FilledButton(
+                                onPressed: () {
+                                  setState(() {
+                                    _future = _api.fetchReport(
+                                      stepIndex: widget.stepIndex,
+                                      stepName: widget.stepName,
+                                    );
+                                  });
+                                },
+                                child: const Text('重新分析'),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    }
                     final metrics = report == null ? widget.metrics : _toMetrics(report);
 
                     final String curveCN = () {
@@ -299,6 +332,10 @@ class _SpineReportPageState extends State<SpineReportPage> {
                       child: Column(
                         children: [
                           const SizedBox(height: 20),
+                          // 【数据来源声明】本页所有分项指标均为演示数据，
+                          // 不是通过手机摄像头测量得到的医学结论，避免被误认为真实 Cobb 角等医学指标。
+                          const _DemoDataBanner(),
+                          const SizedBox(height: 12),
                           // 核心结论总览卡 - 可爱风
                           _CuteCoreConclusionCard(
                             severityCN: sevCN,
@@ -754,7 +791,7 @@ class _CuteMetricsCard extends StatelessWidget {
     const textSoft = Color(0xFF64748B);
     // 定义12个指标数据 - 全部正常
     final indicators = [
-      {'name': 'Cobb角', 'value': _kCobbAngle, 'range': '(侧弯角度)', 'isNormal': true},
+      {'name': 'Cobb角(演示)', 'value': _kCobbAngle, 'range': '(非真实测量)', 'isNormal': true},
       {'name': '弯曲类型', 'value': '正常', 'range': '(脊柱形态)', 'isNormal': true},
       {'name': '侧弯程度', 'value': '正常', 'range': '(Cobb分级)', 'isNormal': true},
       {'name': '高低肩差值', 'value': _kShoulderDiff, 'range': '(<1cm)', 'isNormal': true},
@@ -791,7 +828,7 @@ class _CuteMetricsCard extends StatelessWidget {
               const Icon(Icons.fact_check_rounded, size: 18, color: Color(0xFF6366F1)),
               const SizedBox(width: 8),
               const Text(
-                '分项指标详情',
+                '分项指标参考',
                 style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.w700,
@@ -862,7 +899,8 @@ class _IndicatorCard extends StatelessWidget {
     final Color brand = isNormal ? const Color(0xFF10B981) : const Color(0xFFF59E0B);
     final Color tint = isNormal ? const Color(0xFFECFDF5) : const Color(0xFFFFFBEB);
     return Container(
-      height: 75,
+      // 不再写死高度：写死 75 会超过 GridView 按 childAspectRatio 算出的单元格高度，
+      // 造成 BOTTOM OVERFLOWED。改为撑满单元格，内容自适应（不会遮挡，也不溢出）。
       decoration: BoxDecoration(
         color: tint,
         borderRadius: BorderRadius.circular(16),
@@ -876,7 +914,7 @@ class _IndicatorCard extends StatelessWidget {
         ],
       ),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         child: Row(
           children: [
             // 图标
@@ -909,12 +947,16 @@ class _IndicatorCard extends StatelessWidget {
                   const SizedBox(height: 2),
                   Row(
                     children: [
-                      Text(
-                        value,
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                          color: brand,
+                      Flexible(
+                        child: Text(
+                          value,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.bold,
+                            color: brand,
+                          ),
                         ),
                       ),
                       const SizedBox(width: 6),
@@ -1140,6 +1182,47 @@ class _TrainingCard extends StatelessWidget {
                 '立即训练',
                 style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: Colors.white),
               ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ============================================================================
+//  数据来源声明横幅
+//  本页分项指标（含 Cobb 角）均为演示数据，非手机摄像头真实测量结果。
+// ============================================================================
+class _DemoDataBanner extends StatelessWidget {
+  const _DemoDataBanner();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFFBEB),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFF59E0B).withValues(alpha: 0.55), width: 1.5),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.info_outline, color: Color(0xFFF59E0B), size: 20),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: const [
+                Text('演示数据声明',
+                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: Color(0xFFB45309))),
+                SizedBox(height: 4),
+                Text('本页分项指标（含 Cobb 角）为演示参考数据，并非通过手机摄像头测量得到的医学结论，'
+                    '不作为诊断依据。实际筛查请以专业医疗机构影像检查为准。',
+                    style: TextStyle(fontSize: 12, height: 1.55, color: Color(0xFF92400E))),
+              ],
             ),
           ),
         ],

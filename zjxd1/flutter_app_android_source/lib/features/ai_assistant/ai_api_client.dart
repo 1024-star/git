@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
@@ -80,6 +81,34 @@ class AiApiClient {
     }
 
     return AiScript.fromJson(decoded);
+  }
+
+  /// 小灵问答：把用户问题发给后端（本地规则引擎），返回回答文本。
+  /// 带 12 秒超时，失败抛 AiApiException，避免页面无限等待。
+  Future<String> ask(String question) async {
+    final uri = Uri.parse('$baseUrl/api/ai/chat/ask');
+    final resp = await _client
+        .post(
+          uri,
+          headers: const {'Content-Type': 'application/json; charset=utf-8'},
+          body: jsonEncode({'question': question}),
+        )
+        .timeout(
+          const Duration(seconds: 12),
+          onTimeout: () {
+            AppLogger.e('AI助手API', '问答请求超时（12s）');
+            throw AiApiException('小灵响应超时，请重试');
+          },
+        );
+    final decoded = _tryDecodeJson(resp);
+    if (resp.statusCode != 200) {
+      throw AiApiException(_extractMessage(decoded) ?? '请求失败(${resp.statusCode})');
+    }
+    if (decoded is! Map<String, dynamic>) throw AiApiException('响应格式错误');
+    if (decoded['ok'] != true) {
+      throw AiApiException((decoded['answer'] as String?) ?? '小灵暂时无法回答');
+    }
+    return ((decoded['answer'] as String?) ?? '').trim();
   }
 
   static Object? _tryDecodeJson(http.Response resp) {

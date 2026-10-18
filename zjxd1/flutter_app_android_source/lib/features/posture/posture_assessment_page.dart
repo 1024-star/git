@@ -133,6 +133,16 @@ class _PostureAssessmentPageState extends State<PostureAssessmentPage> with Sing
       setState(() {
         _showResultLoading = true;
       });
+      // 进入分析态后必须自动切走，否则会永远停在「正在分析...」
+      // 真实分析（/api/posture/report）在点「查看报告」后由报告页发起；
+      // 这里只是给用户一个明确的进度反馈，超时兜底后进入完成态。
+      _resultLoadingTimer?.cancel();
+      _resultLoadingTimer = Timer(const Duration(milliseconds: 2600), () {
+        if (!mounted) return;
+        setState(() {
+          _showResultLoading = false;
+        });
+      });
     }
   }
 
@@ -828,8 +838,7 @@ class _GuideSection extends StatelessWidget {
         ),
         child: Column(
           children: [
-            SizedBox(
-              height: 520,
+            Expanded(
               child: Stack(
                 children: [
                   Positioned(
@@ -874,39 +883,25 @@ class _GuideSection extends StatelessWidget {
                       ),
                     ),
                   ),
-                  Center(
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(12, 72, 12, 12),
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(14),
-                        child: Container(
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(14),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withValues(alpha: 0.08),
-                                blurRadius: 15,
-                                offset: const Offset(0, 8),
-                              ),
-                            ],
-                          ),
-                          child: SizedBox(
-                            height: 420,
-                            width: double.infinity,
-                            child: Image.asset(
-                              imageAsset,
-                              fit: BoxFit.contain,
-                              errorBuilder: (context, _, __) {
-                                return Center(
-                                  child: Text(
-                                    '图片加载失败',
-                                    style: TextStyle(color: Colors.black.withValues(alpha: 0.55), fontSize: 14),
-                                  ),
-                                );
-                              },
+                  // 弹性填充：不再写死高度，屏幕高矮都能完整显示，避免 BOTTOM OVERFLOWED
+                  Positioned.fill(
+                    top: 72,
+                    left: 12,
+                    right: 12,
+                    bottom: 12,
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(14),
+                      child: Image.asset(
+                        imageAsset,
+                        fit: BoxFit.contain,
+                        errorBuilder: (context, _, __) {
+                          return Center(
+                            child: Text(
+                              '图片加载失败',
+                              style: TextStyle(color: Colors.black.withValues(alpha: 0.55), fontSize: 14),
                             ),
-                          ),
-                        ),
+                          );
+                        },
                       ),
                     ),
                   ),

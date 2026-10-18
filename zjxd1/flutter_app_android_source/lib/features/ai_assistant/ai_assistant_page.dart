@@ -1,12 +1,17 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
+import 'package:record/record.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:video_player/video_player.dart';
+import 'package:http/http.dart' as http;
 
+import '../../config/app_config.dart';
 import '../../utils/app_logger.dart';
 import 'ai_api_client.dart';
 
@@ -21,6 +26,9 @@ class _AiAssistantPageState extends State<AiAssistantPage> {
   bool showWelcome = true;
 
   final TextEditingController _inputController = TextEditingController();
+
+  /// 小灵语音输入：真实录音器（WAV / 16kHz / 单声道），音频交给 PC 端离线识别
+  final AudioRecorder _recorder = AudioRecorder();
   final ScrollController _scrollController = ScrollController();
 
   bool isTyping = false;
@@ -282,7 +290,52 @@ class _AiAssistantPageState extends State<AiAssistantPage> {
 
     WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
 
-    _fetchAndPlayScript();
+    // 改为真实问答：把用户问题交给后端规则引擎
+    _askAndReply(text);
+  }
+
+  /// 小灵问答：请求后端规则引擎并按打字机效果渲染回答。
+  /// 后端 /api/ai/chat/ask 为本地规则匹配（离线可用），后续换大模型只改后端。
+  Future<void> _askAndReply(String question) async {
+    final assistantIndex = messages.length;
+    setState(() {
+      messages.add(_ChatMessage.ai(blocks: const [], isStreaming: true));
+    });
+
+    try {
+      final answer = await _aiApi.ask(question);
+      if (!mounted) return;
+      final script = AiScript(
+        id: 'rule',
+        generatedAtMs: DateTime.now().millisecondsSinceEpoch,
+        blocks: [
+          AiBlock(type: 'paragraph', delayMs: 100, data: {'text': answer}),
+        ],
+      );
+      await _playScript(script, assistantIndex: assistantIndex);
+    } on AiApiException catch (e, st) {
+      AppLogger.e('AI助手', e, st);
+      if (!mounted) return;
+      setState(() {
+        isThinking = false;
+        isTyping = false;
+        messages[assistantIndex] = messages[assistantIndex].copyWith(
+          isStreaming: false,
+          blocks: [_AiBlock.paragraph('小灵没能回答：${e.message}')],
+        );
+      });
+    } catch (e, st) {
+      AppLogger.e('AI助手', e, st);
+      if (!mounted) return;
+      setState(() {
+        isThinking = false;
+        isTyping = false;
+        messages[assistantIndex] = messages[assistantIndex].copyWith(
+          isStreaming: false,
+          blocks: [_AiBlock.paragraph('网络异常，请稍后再试')],
+        );
+      });
+    }
   }
 
   Future<void> _fetchAndPlayScript() async {
@@ -519,23 +572,98 @@ class _AiAssistantPageState extends State<AiAssistantPage> {
     }
   }
 
-  void _onVoiceStart() {
-    setState(() {
-      isRecording = true;
-    });
+  /// 按住麦克风：开始真实录音（WAV / 16kHz / 单声道）
+  Future<void> _onVoiceStart() async {
+    try {
+      if (!await _recorder.hasPermission()) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('需要麦克风权限，请在系统设置中允许录音')),
+        );
+        return;
+      }
+      final dir = await getTemporaryDirectory();
+      final path = '${dir.path}/ling_${DateTime.now().millisecondsSinceEpoch}.wav';
+      await _recorder.start(
+        const RecordConfig(
+          encoder: AudioEncoder.wav,
+          sampleRate: 16000,
+          numChannels: 1,
+        ),
+        path: path,
+      );
+      if (!mounted) return;
+      setState(() => isRecording = true);
+    } catch (e, st) {
+      AppLogger.e('AI助手', e, st);
+      if (!mounted) return;
+      setState(() => isRecording = false);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('录音启动失败：$e')));
+    }
   }
 
-  void _onVoiceEnd() {
-    setState(() {
-      isRecording = false;
-    });
+  /// 松开麦克风：停止录音 -> 上传 PC 端离线识别 -> 用识别文字向小灵提问
+  Future<void> _onVoiceEnd() async {
+    if (!isRecording) return;
+    setState(() => isRecording = false);
 
-    // 模拟录音结束后自动输入并发送
-    final script = '请基于我的个人信息，生成一周的个性化康复训练计划。';
-    Future<void>.delayed(const Duration(milliseconds: 350), () { // slightly speed up simulated voice type-and-send
-      if (!mounted) return;
-      _typeAndSend(script);
+    String? path;
+    try {
+      path = await _recorder.stop();
+    } catch (e, st) {
+      AppLogger.e('AI助手', e, st);
+    }
+    if (path == null || path.isEmpty || !mounted) return;
+
+    if (showWelcome) _enterChat();
+    setState(() {
+      isTyping = true;
+      isThinking = true;
     });
+    _inputController.text = '正在识别语音…';
+
+    try {
+      final file = File(path);
+      final bytes = await file.readAsBytes();
+      if (bytes.length < 2000) {
+        throw Exception('录音太短，请按住多说一会儿');
+      }
+      final resp = await http
+          .post(Uri.parse(kSttUrl), headers: const {'Content-Type': 'audio/wav'}, body: bytes)
+          .timeout(const Duration(seconds: 90));
+      final decoded = jsonDecode(utf8.decode(resp.bodyBytes)) as Map<String, dynamic>;
+      final text = (decoded['text'] as String?)?.trim() ?? '';
+      if (!mounted) return;
+      _inputController.clear();
+      setState(() {
+        isTyping = false;
+        isThinking = false;
+      });
+      if (text.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('没听清，请再说一次${decoded['error'] == null ? '' : '（${decoded['error']}）'}')),
+        );
+        return;
+      }
+      // 把识别出来的话作为用户消息显示，再走正常问答
+      setState(() => messages.add(_ChatMessage.user(text)));
+      _saveChatHistory();
+      WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
+      await _askAndReply(text);
+    } catch (e, st) {
+      AppLogger.e('AI助手', e, st);
+      if (!mounted) return;
+      _inputController.clear();
+      setState(() {
+        isTyping = false;
+        isThinking = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('语音识别失败：$e')));
+    } finally {
+      try {
+        await File(path).delete();
+      } catch (_) {}
+    }
   }
 
   Future<void> _typeAndSend(String script) async {

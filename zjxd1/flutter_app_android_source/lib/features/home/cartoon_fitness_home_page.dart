@@ -1138,13 +1138,17 @@ class _FunctionSection extends StatelessWidget {
                         .map((c) => Color.lerp(c, Colors.white, 0.68)!)
                         .toList(growable: false);
 
+                    // 统一宽度（4 等分）；高度不再等于宽度 —— 正方形放不下 4 个字标题，
+                    // 改为按「图标 + 2 行标题」预留足够高度，长名称可自动换行。
+                    final cardHeight = squareSize * 1.40;
                     return Padding(
                       padding: EdgeInsets.only(right: index == functions.length - 1 ? 0 : gap),
                       child: SizedBox(
                         width: squareSize,
-                        height: squareSize,
+                        height: cardHeight,
                         child: _FunctionModuleCard(
                           size: squareSize,
+                          cardHeight: cardHeight,
                           function: f,
                           isActive: isActive,
                           themeColors: themed,
@@ -1166,6 +1170,7 @@ class _FunctionSection extends StatelessWidget {
 class _FunctionModuleCard extends StatefulWidget {
   const _FunctionModuleCard({
     required this.size,
+    required this.cardHeight,
     required this.function,
     required this.isActive,
     required this.themeColors,
@@ -1173,6 +1178,7 @@ class _FunctionModuleCard extends StatefulWidget {
   });
 
   final double size;
+  final double cardHeight;
   final _FunctionItem function;
   final bool isActive;
   final List<Color> themeColors;
@@ -1238,7 +1244,7 @@ class _FunctionModuleCardState extends State<_FunctionModuleCard>
           return Transform.scale(
             scale: _pressAnimation.value,
             child: Container(
-              height: widget.size,
+              height: widget.cardHeight,
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(widget.size * 0.26),
                 color: Colors.transparent,
@@ -1296,14 +1302,14 @@ class _FunctionModuleCardState extends State<_FunctionModuleCard>
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         SizedBox(
-                          width: widget.size * 0.60,
-                          height: widget.size * 0.60,
+                          width: widget.size * 0.66,
+                          height: widget.size * 0.66,
                           child: Stack(
                             alignment: Alignment.center,
                             children: [
                               Container(
-                                width: widget.size * 0.60,
-                                height: widget.size * 0.60,
+                                width: widget.size * 0.66,
+                                height: widget.size * 0.66,
                                 decoration: BoxDecoration(
                                   borderRadius: BorderRadius.circular(widget.size * 0.18),
                                   color: surface.withValues(alpha: 0.55),
@@ -1311,8 +1317,8 @@ class _FunctionModuleCardState extends State<_FunctionModuleCard>
                                 ),
                               ),
                               SizedBox(
-                                width: widget.size * 0.35,
-                                height: widget.size * 0.35,
+                                width: widget.size * 0.44,
+                                height: widget.size * 0.44,
                                 child: ClipRRect(
                                   borderRadius: BorderRadius.circular(widget.size * 0.18),
                                   child: Image.asset(
@@ -1335,22 +1341,30 @@ class _FunctionModuleCardState extends State<_FunctionModuleCard>
                             ],
                           ),
                         ),
-                        const SizedBox(height: 4),
+                        const SizedBox(height: 6),
+                        // 标题固定一行显示：
+                        // 用 FittedBox(scaleDown) 把整段文字等比缩放到刚好放进卡片宽度，
+                        // 不会出现「姿...」这种截断（没有 ellipsis），也不会折行。
+                        // fontSize 17 是上限，卡片窄时自动缩，宽时保持 17。
                         Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 6),
-                          child: Transform.translate(
-                            offset: const Offset(0, 9),
-                            child: Text(
-                              widget.function.name,
-                              textAlign: TextAlign.center,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                fontSize: 20,
-                                fontWeight: FontWeight.w700,
-                                color: const Color(0xFF111827)
-                                    .withValues(alpha: widget.isActive ? 0.92 : 0.78),
-                                height: 1.1,
+                          padding: const EdgeInsets.symmetric(horizontal: 2),
+                          child: SizedBox(
+                            width: double.infinity,
+                            child: FittedBox(
+                              fit: BoxFit.scaleDown,
+                              alignment: Alignment.center,
+                              child: Text(
+                                widget.function.name,
+                                textAlign: TextAlign.center,
+                                softWrap: false,
+                                maxLines: 1,
+                                style: TextStyle(
+                                  fontSize: 17,
+                                  fontWeight: FontWeight.w700,
+                                  color: const Color(0xFF111827)
+                                      .withValues(alpha: widget.isActive ? 0.92 : 0.78),
+                                  height: 1.15,
+                                ),
                               ),
                             ),
                           ),

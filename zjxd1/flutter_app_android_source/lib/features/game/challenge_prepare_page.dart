@@ -103,6 +103,7 @@ class _ChallengePreparePageState extends State<ChallengePreparePage> with Single
     try {
       await _videoController.initialize();
       await _videoController.setLooping(false);
+      await _videoController.setVolume(1.0);
       _videoController.addListener(_onVideoTick);
 
       _videoInitTimeout?.cancel();
@@ -130,6 +131,7 @@ class _ChallengePreparePageState extends State<ChallengePreparePage> with Single
     try {
       await _videoController.initialize();
       await _videoController.setLooping(false);
+      await _videoController.setVolume(1.0);
       if (!mounted) return;
       setState(() {
         _videoReady = true;
@@ -202,6 +204,7 @@ class _ChallengePreparePageState extends State<ChallengePreparePage> with Single
     }
 
     try {
+      await _videoController.setVolume(1.0);
       await _videoController.play();
     } catch (e, st) {
       AppLogger.e('挑战准备', e, st);
@@ -1410,9 +1413,11 @@ class _ChallengePreparePageState extends State<ChallengePreparePage> with Single
                                           return FilledButton(
                                             onPressed: canStart
                                                 ? () async {
+                                                    AppLogger.i('挑战准备', '[TIME] E0 点击开始游戏');
                                                     Navigator.of(context).pop();
                                                     await _stopGateMedia();
                                                     if (!mounted) return;
+                                                    AppLogger.i('挑战准备', '[TIME] E1 即将 push 训练页');
                                                     _startChallenge();
                                                   }
                                                 : null,
@@ -1489,6 +1494,7 @@ class _ChallengePreparePageState extends State<ChallengePreparePage> with Single
   }
 
   void _startChallenge() {
+    AppLogger.i('挑战准备', '[TIME] E2 _startChallenge 执行');
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => CameraJumpChallengePage(

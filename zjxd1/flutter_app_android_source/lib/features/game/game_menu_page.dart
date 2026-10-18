@@ -1154,7 +1154,13 @@ class _SceneSelectorDialog extends StatelessWidget {
       elevation: 16,
       shadowColor: const Color(0xFF8A2BE2).withOpacity(0.15),
       backgroundColor: Colors.white,
-      child: ClipRRect(
+      child: ConstrainedBox(
+        // 限制最大高度：横屏/小屏时弹窗不能超过可用高度，否则内部 Column 会溢出
+        constraints: BoxConstraints(
+          maxWidth: 420,
+          maxHeight: MediaQuery.of(context).size.height - 48,
+        ),
+        child: ClipRRect(
         borderRadius: BorderRadius.circular(24),
         child: SizedBox(
           width: 420,
@@ -1236,7 +1242,9 @@ class _SceneSelectorDialog extends StatelessWidget {
                     crossAxisCount: 2,
                     crossAxisSpacing: 21, 
                     mainAxisSpacing: 21, 
-                    childAspectRatio: 1.15, // 调整比例让模块更窄
+                    // 1.15 时格子高度≈156px，与卡片内容（图60+标题+2行描述+内外边距）几乎相等，
+                    // 字形差异就会 BOTTOM OVERFLOWED 22 / 8.3 像素。降到 1.0 留出约 25px 余量。
+                    childAspectRatio: 1.0,
                   ),
                   itemBuilder: (context, index) {
                     final s = scenes[index];
@@ -1271,7 +1279,7 @@ class _SceneSelectorDialog extends StatelessWidget {
                                   borderRadius: BorderRadius.circular(10),
                                   child: SizedBox(
                                     width: double.infinity,
-                                    height: 60,
+                                    height: 56,
                                     child: Image.asset(
                                       s.imageAsset,
                                       fit: BoxFit.cover,
@@ -1320,6 +1328,7 @@ class _SceneSelectorDialog extends StatelessWidget {
           ),
         ),
       ),
+        ),
     );
   }
 }
